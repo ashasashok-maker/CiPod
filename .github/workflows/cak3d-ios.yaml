@@ -1,0 +1,35 @@
+name: CAK3D iOS build (unsigned IPA)
+
+# Run from the Actions tab ("Run workflow"). Produces an unsigned IPA to
+# sideload with AltStore / Sideloadly, which sign it with your Apple ID.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: pubspec.yaml
+          channel: stable
+          cache: true
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: ios
+
+      - name: Build and package without Apple credentials
+        working-directory: ios
+        run: bundle exec fastlane build_apple_release platform:ios
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: classipod-ios
+          path: build/releases/Classipod-iOS.ipa
+          if-no-files-found: error
