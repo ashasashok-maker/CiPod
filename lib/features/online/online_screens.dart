@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:classipod/core/extensions/build_context_extensions.dart';
 import 'package:classipod/core/models/music_metadata.dart';
 import 'package:classipod/core/navigation/routes.dart';
+import 'package:classipod/core/services/audio_player_service.dart';
 import 'package:classipod/core/theme/ipod_typography.dart';
 import 'package:classipod/core/widgets/album_art_song_list_tile.dart';
 import 'package:classipod/core/widgets/display_list_tile.dart';
@@ -760,13 +761,50 @@ class _YouTubePlaylistScreenState extends ConsumerState<YouTubePlaylistScreen>
     }
   }
 
+  bool _starting = false;
+
   @override
   Future<void> onSelectPressed() => _play(selectedDisplayItem);
 
+  /// Says what's happening at each step, so a song that won't start shows
+  /// why instead of silently doing nothing.
   Future<void> _play(int index) async {
-    if (index >= _videos.length) return;
-    setState(() => selectedDisplayItem = index);
-    await playOnline(context, ref, displayItems, index);
+    if (index >= _videos.length || _starting) return;
+    final video = _videos[index];
+    setState(() {
+      selectedDisplayItem = index;
+      _starting = true;
+      _status = 'Getting audio for ${video.title}…';
+    });
+    try {
+      // Resolve the stream first (it's cached for the player), so a video
+      // YouTube won't serve fails here with a readable reason.
+      await YouTubeAudio.audioUrl(video.id).timeout(
+        const Duration(seconds: 25),
+      );
+      if (!mounted) return;
+      setState(() => _status = 'Starting playback…');
+      await playOnline(context, ref, displayItems, index).timeout(
+        const Duration(seconds: 25),
+      );
+      if (!mounted) return;
+      final error = ref.read(audioPlayerServiceProvider).error;
+      setState(
+        () => _status = error == null ? null : "Couldn't play: $error",
+      );
+    } on TimeoutException {
+      if (mounted) {
+        setState(
+          () => _status =
+              'Timed out starting ${video.title}. Check the connection and '
+              'try again.',
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => _status = "Couldn't play ${video.title}: $e");
+    } finally {
+      _starting = false;
+    }
   }
 
   @override
@@ -783,6 +821,8 @@ class _YouTubePlaylistScreenState extends ConsumerState<YouTubePlaylistScreen>
               padding: const EdgeInsets.all(8),
               child: Text(
                 _status!,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
                 style: IpodTypography.metadata.copyWith(
                   color: context.appSecondaryTextColor,
                 ),
