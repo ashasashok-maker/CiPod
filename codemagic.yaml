@@ -1,0 +1,22 @@
+# Codemagic build for Classipod: unsigned iOS IPA (sideload with Sideloadly).
+# Put this file in the root of the repo, next to pubspec.yaml.
+workflows:
+  ios-unsigned-ipa:
+    name: iOS unsigned IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: 3.47.6   # matches pubspec.yaml; use "stable" if Codemagic rejects it
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Get packages
+        script: flutter pub get --suppress-analytics
+      - name: Generate code
+        script: dart run build_runner build --delete-conflicting-outputs
+      - name: Generate translations
+        script: flutter gen-l10n
+      - name: Build and package IPA
+        script: bash scripts/package_apple_release.sh ios
+    artifacts:
+      - build/releases/Classipod-iOS.ipa
