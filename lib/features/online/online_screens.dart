@@ -780,12 +780,12 @@ class _YouTubePlaylistScreenState extends ConsumerState<YouTubePlaylistScreen>
       // Resolve the stream first (it's cached for the player), so a video
       // YouTube won't serve fails here with a readable reason.
       await YouTubeAudio.audioUrl(video.id).timeout(
-        const Duration(seconds: 25),
+        const Duration(seconds: 45),
       );
       if (!mounted) return;
       setState(() => _status = 'Starting playback…');
       await playOnline(context, ref, displayItems, index).timeout(
-        const Duration(seconds: 25),
+        const Duration(seconds: 45),
       );
       if (!mounted) return;
       final error = ref.read(audioPlayerServiceProvider).error;

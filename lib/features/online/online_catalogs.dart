@@ -401,60 +401,52 @@ class YouTubeAudio {
     return manifest.audioOnly.withHighestBitrate().url.toString();
   }
 
-  /// AVPlayer only decodes MP4/AAC, and for YouTube Music "Topic" tracks some
-  /// clients hand out links it can't open. So try each client in turn, keep
-  /// MP4 streams only, and check a link actually answers before using it.
-  /// Last resort is the MP4 video+audio stream, which AVPlayer always plays.
+  /// Sent when checking a link and again when playing it (via just_audio's
+  /// local proxy, see audio_player_service.dart), so the player is served
+  /// exactly like the check that passed.
+  static const appleHeaders = {'User-Agent': 'Mozilla/5.0'};
+
+  /// AVPlayer only decodes MP4, and for YouTube Music "Topic" tracks the
+  /// audio-only link can be refused partway in. So check MP4 audio first, then
+  /// the MP4 video+audio stream (larger, but nearly always served), and use
+  /// the first link that answers. Every step has a short time limit.
   static Future<String> _appleAudioUrl(String id) async {
-    final clients = [
-      YoutubeApiClient.ios,
-      YoutubeApiClient.androidVr,
-      YoutubeApiClient.android,
-    ];
-    final muxedFallbacks = <String>[];
-    Object? lastError;
-    for (final client in clients) {
-      try {
-        final manifest = await _yt.videos.streams.getManifest(
+    final manifest = await _yt.videos.streams
+        .getManifest(
           id,
-          ytClients: [client],
-        );
-        final audio =
-            manifest.audioOnly
-                .where((s) => s.container == StreamContainer.mp4)
-                .toList()
-              ..sort(
-                (a, b) => b.bitrate.bitsPerSecond.compareTo(
-                  a.bitrate.bitsPerSecond,
-                ),
-              );
-        for (final stream in audio) {
-          final url = stream.url.toString();
-          if (await _answers(url)) return url;
-        }
-        final muxed = manifest.muxed.where(
-          (s) => s.container == StreamContainer.mp4,
-        );
-        muxedFallbacks.addAll(muxed.map((s) => s.url.toString()));
-      } catch (e) {
-        lastError = e;
-      }
+          ytClients: [YoutubeApiClient.androidVr, YoutubeApiClient.android],
+        )
+        .timeout(const Duration(seconds: 15));
+    int bps(StreamInfo s) => s.bitrate.bitsPerSecond;
+    final audio =
+        manifest.audioOnly
+            .where((s) => s.container == StreamContainer.mp4)
+            .toList()
+          ..sort((a, b) => bps(b).compareTo(bps(a)));
+    final muxed =
+        manifest.muxed
+            .where((s) => s.container == StreamContainer.mp4)
+            .toList()
+          ..sort((a, b) => bps(a).compareTo(bps(b))); // smallest video first
+    final candidates = <StreamInfo>[...audio.take(2), ...muxed.take(2)];
+    for (final stream in candidates) {
+      if (await _answers(stream)) return stream.url.toString();
     }
-    for (final url in muxedFallbacks) {
-      if (await _answers(url)) return url;
-    }
-    throw StateError(
-      'YouTube has no iPhone-playable stream for this track'
-      '${lastError == null ? '' : ' ($lastError)'}',
-    );
+    throw StateError('YouTube refused every iPhone-playable stream for this track');
   }
 
-  /// True if [url] serves bytes (asks for just the first two).
-  static Future<bool> _answers(String url) async {
+  /// True if [stream] serves bytes from the middle of the file, where refused
+  /// links fail even when the first bytes come through.
+  static Future<bool> _answers(StreamInfo stream) async {
+    final size = stream.size.totalBytes;
+    final from = size > 4 ? size ~/ 2 : 0;
     try {
       final res = await http
-          .get(Uri.parse(url), headers: {'Range': 'bytes=0-1'})
-          .timeout(const Duration(seconds: 8));
+          .get(
+            stream.url,
+            headers: {...appleHeaders, 'Range': 'bytes=$from-${from + 1}'},
+          )
+          .timeout(const Duration(seconds: 5));
       return res.statusCode == 200 || res.statusCode == 206;
     } catch (_) {
       return false;
