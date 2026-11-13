@@ -339,3 +339,30 @@ GitHub, or on a Mac run
 `cd ios && bundle exec fastlane build_apple_release platform:ios`.
 The IPA in `build/releases/` is unsigned. Install it with AltStore or
 Sideloadly, which sign it with your Apple ID.
+
+## YouTube playlists and My YouTube (CAK3D fork)
+
+**YouTube Playlists** (no sign-in): in YouTube or YouTube Music open a
+playlist, use *Share > Copy link*, then in Classipod go to
+*Online > YouTube Playlists > Paste Playlist Link*. The playlist must be
+Public or Unlisted. Hold select on a playlist to remove it.
+
+**My YouTube** (Google sign-in, read-only) shows your liked videos and all
+your playlists, private ones included. One-time setup:
+
+1. At https://console.cloud.google.com create a project, then enable
+   *YouTube Data API v3* (APIs & Services > Library).
+2. *OAuth consent screen*: user type External, fill in the app name and your
+   email, add the scope `.../auth/youtube.readonly`, and add your Google
+   account under *Test users*.
+3. *Credentials > Create credentials > OAuth client ID*, type
+   **TVs and Limited Input devices**. Copy the client ID and secret.
+4. In Codemagic: app settings > *Environment variables*, add `YT_CLIENT_ID`
+   and `YT_CLIENT_SECRET` (mark the secret as Secure) in a group named
+   `youtube`, then rebuild.
+
+In the app, select *Sign In*, then enter the code shown at google.com/device
+(on any device, or select *Open Google Sign-In Page*). While the Google app
+is in Testing mode, Google ends the sign-in after 7 days; just sign in again.
+Playback itself works the same as YouTube search: Premium features such as
+YouTube Music's higher-quality audio aren't available to other apps.
