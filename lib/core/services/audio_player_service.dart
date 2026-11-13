@@ -34,7 +34,21 @@ final libraryAudioHandlerProvider = Provider<LibraryAudioHandler>((ref) {
         final url = await YouTubeAudio.audioUrl(
           path.substring(youTubeScheme.length),
         );
-        return song.copyWith(filePath: url).toAudioSource() as UriAudioSource;
+        final source =
+            song.copyWith(filePath: url).toAudioSource() as UriAudioSource;
+        final apple =
+            !kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.iOS ||
+                defaultTargetPlatform == TargetPlatform.macOS);
+        if (!apple) return source;
+        // Headers make just_audio fetch through its local proxy (Dart's HTTP
+        // client) instead of AVPlayer's own requests, which YouTube refuses
+        // for some tracks.
+        return AudioSource.uri(
+          source.uri,
+          headers: YouTubeAudio.appleHeaders,
+          tag: source.tag,
+        );
       }
       if (!song.isSubsonic) return song.toAudioSource() as UriAudioSource;
       final remote = ref.read(subsonicControllerProvider).value;
