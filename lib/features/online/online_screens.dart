@@ -15,10 +15,13 @@ import 'package:classipod/features/now_playing/provider/now_playing_details_prov
 import 'package:classipod/features/online/online_catalogs.dart';
 import 'package:classipod/features/online/online_library.dart';
 import 'package:classipod/features/online/online_playback.dart';
+import 'package:classipod/features/online/youtube_account.dart';
 import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // region Online menu
 
@@ -28,6 +31,8 @@ enum _OnlineItems {
   radio('Radio'),
   podcasts('Podcasts'),
   youTube('YouTube'),
+  youTubePlaylists('YouTube Playlists'),
+  myYouTube('My YouTube'),
   spotify('Spotify'),
   otherApp('Other App');
 
@@ -68,6 +73,10 @@ class _OnlineMenuScreenState extends ConsumerState<OnlineMenuScreen>
         context.goNamed(Routes.podcasts.name);
       case _OnlineItems.youTube:
         context.goNamed(Routes.youTube.name);
+      case _OnlineItems.youTubePlaylists:
+        context.goNamed(Routes.youTubePlaylists.name);
+      case _OnlineItems.myYouTube:
+        context.goNamed(Routes.myYouTube.name);
       case _OnlineItems.spotify:
         context.goNamed(Routes.spotify.name);
       case _OnlineItems.otherApp:
@@ -509,6 +518,479 @@ class _PodcastEpisodesScreenState extends ConsumerState<PodcastEpisodesScreen>
       ),
     );
   }
+}
+
+// endregion
+// region YouTube playlists (saved links and the signed-in account)
+
+/// Shared look for the text-menu screens below: an optional status line (and
+/// a big sign-in code), then iPod menu rows.
+Widget _menuPage(
+  BuildContext context, {
+  required ScrollController scrollController,
+  required List<String> rows,
+  required int selected,
+  required void Function(int index) onTap,
+  String? status,
+  String? code,
+}) {
+  final secondary = IpodTypography.metadata.copyWith(
+    color: context.appSecondaryTextColor,
+  );
+  return CupertinoPageScaffold(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (status != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Text(status, maxLines: 4, style: secondary),
+          ),
+        if (code != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              code,
+              textAlign: TextAlign.center,
+              style: IpodTypography.title.copyWith(
+                fontSize: 26,
+                letterSpacing: 2,
+              ),
+            ),
+          ),
+        Flexible(
+          child: CupertinoScrollbar(
+            controller: scrollController,
+            child: ListView.builder(
+              controller: scrollController,
+              itemCount: rows.length,
+              prototypeItem: const DisplayListTile(text: '', isSelected: false),
+              itemBuilder: (context, index) => DisplayListTile(
+                text: rows[index],
+                isSelected: selected == index,
+                onTap: () => onTap(index),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Playlists kept by link. In YouTube or YouTube Music use Share > Copy link
+/// on a playlist (it must be Public or Unlisted), then "Paste Playlist Link".
+/// Hold select on a playlist to remove it.
+class YouTubePlaylistsScreen extends ConsumerStatefulWidget {
+  const YouTubePlaylistsScreen({super.key});
+
+  @override
+  ConsumerState createState() => _YouTubePlaylistsScreenState();
+}
+
+class _YouTubePlaylistsScreenState
+    extends ConsumerState<YouTubePlaylistsScreen>
+    with CustomScreen {
+  List<YtPlaylist> _saved = [];
+  String? _status;
+  bool _busy = false;
+
+  @override
+  String get routeName => Routes.youTubePlaylists.name;
+
+  @override
+  List<String> get displayItems => [
+    'Paste Playlist Link',
+    for (final p in _saved) p.title,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    final saved = await OnlineLibrary.savedPlaylists();
+    if (!mounted) return;
+    setState(() {
+      _saved = saved;
+      if (saved.isEmpty) {
+        _status =
+            'Copy a playlist link in YouTube (Share > Copy link), '
+            'then select Paste Playlist Link.';
+      }
+    });
+  }
+
+  @override
+  Future<void> onSelectPressed() => _activate(selectedDisplayItem);
+
+  Future<void> _activate(int index) async {
+    setState(() => selectedDisplayItem = index);
+    if (index == 0) return _paste();
+    final i = index - 1;
+    if (i >= _saved.length) return;
+    context.goNamed(Routes.youTubePlaylist.name, extra: _saved[i]);
+  }
+
+  Future<void> _paste() async {
+    if (_busy) return;
+    final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';
+    final id = YouTubeAudio.playlistId(text);
+    if (!mounted) return;
+    if (id == null) {
+      setState(
+        () => _status =
+            'No playlist link copied. In YouTube open the playlist, '
+            'then Share > Copy link.',
+      );
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _status = 'Loading playlist…';
+    });
+    try {
+      final playlist = await YouTubeAudio.playlist(id);
+      await OnlineLibrary.addPlaylist(playlist);
+      await _load();
+      if (mounted) setState(() => _status = 'Added ${playlist.title}.');
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _status =
+              "Couldn't open that playlist. Set it to Public or Unlisted, "
+              'or use My YouTube for private ones.',
+        );
+      }
+    } finally {
+      _busy = false;
+    }
+  }
+
+  @override
+  void onSelectLongPress() => unawaited(_remove(selectedDisplayItem));
+
+  Future<void> _remove(int index) async {
+    final i = index - 1;
+    if (i < 0 || i >= _saved.length) return;
+    final playlist = _saved[i];
+    await OnlineLibrary.removePlaylist(playlist.id);
+    await _load();
+    if (!mounted) return;
+    setState(() {
+      _status = 'Removed ${playlist.title}.';
+      selectedDisplayItem = (index - 1).clamp(0, displayItems.length - 1);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => _menuPage(
+    context,
+    scrollController: scrollController,
+    rows: displayItems,
+    selected: selectedDisplayItem,
+    onTap: (i) => unawaited(_activate(i)),
+    status: _status,
+  );
+}
+
+/// The videos of one playlist: through the account for [YtPlaylist.mine]
+/// ones (private works), otherwise read publicly.
+class YouTubePlaylistScreen extends ConsumerStatefulWidget {
+  final YtPlaylist playlist;
+  final String route;
+
+  const YouTubePlaylistScreen({
+    super.key,
+    required this.playlist,
+    required this.route,
+  });
+
+  @override
+  ConsumerState createState() => _YouTubePlaylistScreenState();
+}
+
+class _YouTubePlaylistScreenState extends ConsumerState<YouTubePlaylistScreen>
+    with CustomScreen {
+  List<YtVideo> _videos = [];
+  String? _status = 'Loading…';
+
+  @override
+  double get displayTileHeight => 54;
+
+  @override
+  String get routeName => widget.route;
+
+  @override
+  List<MusicMetadata> get displayItems => [
+    for (var i = 0; i < _videos.length; i++)
+      _videos[i]
+          .toMetadata(i)
+          .copyWith(albumName: widget.playlist.title),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    final p = widget.playlist;
+    try {
+      final list = p.mine
+          ? await YouTubeAccount.playlistVideos(p.id)
+          : await YouTubeAudio.playlistVideos(p.id);
+      if (mounted) {
+        setState(() {
+          _videos = list;
+          _status = list.isEmpty ? 'This playlist is empty.' : null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => _status = p.mine
+              ? "Couldn't load: $e"
+              : "Couldn't load. Is the playlist still Public or Unlisted?",
+        );
+      }
+    }
+  }
+
+  @override
+  Future<void> onSelectPressed() => _play(selectedDisplayItem);
+
+  Future<void> _play(int index) async {
+    if (index >= _videos.length) return;
+    setState(() => selectedDisplayItem = index);
+    await playOnline(context, ref, displayItems, index);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = displayItems;
+    final playing = ref
+        .watch(nowPlayingDetailsProvider.select((e) => e.currentMetadata))
+        ?.identity;
+    return CupertinoPageScaffold(
+      child: Column(
+        children: [
+          if (_status != null)
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                _status!,
+                style: IpodTypography.metadata.copyWith(
+                  color: context.appSecondaryTextColor,
+                ),
+              ),
+            ),
+          Flexible(
+            child: CupertinoScrollbar(
+              controller: scrollController,
+              child: ListView.builder(
+                controller: scrollController,
+                itemCount: items.length,
+                itemExtent: 54,
+                itemBuilder: (context, index) => AlbumArtSongListTile(
+                  songMetadata: items[index],
+                  isSelected: selectedDisplayItem == index,
+                  isCurrentlyPlaying: playing == items[index].identity,
+                  onTap: () => _play(index),
+                  onLongPress: () {},
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The signed-in Google account's liked videos and playlists, private ones
+/// included. Sign-in shows a code to enter at google.com/device.
+class MyYouTubeScreen extends ConsumerStatefulWidget {
+  const MyYouTubeScreen({super.key});
+
+  @override
+  ConsumerState createState() => _MyYouTubeScreenState();
+}
+
+class _MyYouTubeScreenState extends ConsumerState<MyYouTubeScreen>
+    with CustomScreen {
+  bool? _signedIn;
+  DeviceCode? _code;
+  List<YtPlaylist> _playlists = [];
+  String? _status;
+
+  static const _liked = YtPlaylist(
+    id: YtPlaylist.likedId,
+    title: 'Liked Videos',
+    mine: true,
+  );
+
+  @override
+  String get routeName => Routes.myYouTube.name;
+
+  List<(String, Future<void> Function())> get _rows {
+    final code = _code;
+    if (code != null) {
+      return [
+        ('Open Google Sign-In Page', () => _openPage(code)),
+        ('Cancel', _cancel),
+      ];
+    }
+    return switch (_signedIn) {
+      null => [],
+      false => [('Sign In', _signIn)],
+      true => [
+        ('Liked Videos', () => _open(_liked)),
+        for (final p in _playlists) (p.title, () => _open(p)),
+        ('Refresh', _refresh),
+        ('Sign Out', _signOut),
+      ],
+    };
+  }
+
+  @override
+  List<String> get displayItems => [for (final row in _rows) row.$1];
+
+  @override
+  void initState() {
+    super.initState();
+    if (!YouTubeAccount.isConfigured) {
+      _status =
+          "This build doesn't have Google sign-in set up yet. "
+          'See "My YouTube" in the README.';
+      return;
+    }
+    unawaited(_refresh());
+  }
+
+  @override
+  void dispose() {
+    _code = null; // stops the sign-in polling
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    final signedIn = await YouTubeAccount.isSignedIn();
+    if (!mounted) return;
+    setState(() {
+      _signedIn = signedIn;
+      _status = signedIn ? 'Loading your playlists…' : null;
+    });
+    if (!signedIn) return;
+    try {
+      final playlists = await YouTubeAccount.playlists();
+      if (mounted) {
+        setState(() {
+          _playlists = playlists;
+          _status = null;
+        });
+      }
+    } catch (e) {
+      final still = await YouTubeAccount.isSignedIn();
+      if (mounted) {
+        setState(() {
+          _signedIn = still;
+          _status = "$e";
+        });
+      }
+    }
+  }
+
+  void _select(int index) {
+    final rows = _rows;
+    if (index >= rows.length) return;
+    setState(() => selectedDisplayItem = index);
+    unawaited(rows[index].$2());
+  }
+
+  @override
+  void onSelectPressed() => _select(selectedDisplayItem);
+
+  Future<void> _open(YtPlaylist playlist) async {
+    context.goNamed(Routes.myYouTubePlaylist.name, extra: playlist);
+  }
+
+  Future<void> _signIn() async {
+    setState(() => _status = 'Getting a sign-in code…');
+    final DeviceCode code;
+    try {
+      code = await YouTubeAccount.startSignIn();
+    } catch (e) {
+      if (mounted) setState(() => _status = "Couldn't start sign-in: $e");
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _code = code;
+      selectedDisplayItem = 0;
+      _status =
+          'On any phone or computer go to google.com/device and enter this '
+          'code, or select Open below:';
+    });
+    final ok = await YouTubeAccount.waitForApproval(
+      code,
+      isCancelled: () => !mounted || _code != code,
+    );
+    if (!mounted || _code != code) return;
+    setState(() {
+      _code = null;
+      selectedDisplayItem = 0;
+      _status = ok
+          ? null
+          : 'Sign-in was declined or the code expired. Select Sign In again.';
+    });
+    if (ok) await _refresh();
+  }
+
+  Future<void> _openPage(DeviceCode code) async {
+    await Clipboard.setData(ClipboardData(text: code.userCode));
+    if (mounted) {
+      setState(
+        () => _status =
+            'Code copied. Paste it on the Google page, approve, '
+            'then come back here.',
+      );
+    }
+    await launchUrl(Uri.parse(code.url), mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _cancel() async {
+    setState(() {
+      _code = null;
+      _status = null;
+      selectedDisplayItem = 0;
+    });
+  }
+
+  Future<void> _signOut() async {
+    await YouTubeAccount.signOut();
+    if (!mounted) return;
+    setState(() {
+      _signedIn = false;
+      _playlists = [];
+      _status = 'Signed out.';
+      selectedDisplayItem = 0;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => _menuPage(
+    context,
+    scrollController: scrollController,
+    rows: displayItems,
+    selected: selectedDisplayItem,
+    onTap: _select,
+    status: _status,
+    code: _code?.userCode,
+  );
 }
 
 // endregion

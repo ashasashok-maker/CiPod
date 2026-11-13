@@ -195,6 +195,44 @@ class YtVideo {
   );
 }
 
+/// A YouTube or YouTube Music playlist. [mine] playlists come from the
+/// signed-in Google account (see youtube_account.dart) and can be private;
+/// the rest are read publicly, so they must be public or unlisted.
+class YtPlaylist {
+  /// Stands in for the account's liked videos, which have no playlist id.
+  static const likedId = 'LIKED';
+
+  final String id;
+  final String title;
+  final String? author;
+  final String? thumbnail;
+  final bool mine;
+
+  const YtPlaylist({
+    required this.id,
+    required this.title,
+    this.author,
+    this.thumbnail,
+    this.mine = false,
+  });
+
+  factory YtPlaylist.fromJson(Map<String, dynamic> o) => YtPlaylist(
+    id: o['id'] as String,
+    title: o['title'] as String? ?? '',
+    author: o['author'] as String?,
+    thumbnail: o['thumbnail'] as String?,
+    mine: o['mine'] as bool? ?? false,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'author': author,
+    'thumbnail': thumbnail,
+    'mine': mine,
+  };
+}
+
 class OnlineCatalogs {
   OnlineCatalogs._();
 
@@ -366,6 +404,45 @@ class YouTubeAudio {
     _resolved[id] = (url, DateTime.now());
     return url;
   }
+
+  /// Pulls the playlist id from a YouTube / YouTube Music link (or a bare
+  /// id), or null if [text] has none.
+  static String? playlistId(String text) {
+    final t = text.trim();
+    final fromLink = RegExp(r'[?&]list=([A-Za-z0-9_-]+)').firstMatch(t);
+    if (fromLink != null) return fromLink.group(1);
+    if (RegExp(r'^(PL|OL|UU|FL|RD)[A-Za-z0-9_-]{8,}$').hasMatch(t)) return t;
+    return null;
+  }
+
+  /// A public or unlisted playlist's details, read without signing in.
+  static Future<YtPlaylist> playlist(String id) async {
+    final p = await _yt.playlists.get(id);
+    final first = await _yt.playlists.getVideos(id).take(1).toList();
+    return YtPlaylist(
+      id: p.id.value,
+      title: p.title,
+      author: p.author,
+      thumbnail: first.isEmpty
+          ? null
+          : 'https://img.youtube.com/vi/${first.first.id.value}/hqdefault.jpg',
+    );
+  }
+
+  /// The videos of a public or unlisted playlist, in order.
+  static Future<List<YtVideo>> playlistVideos(String id, {int limit = 500}) =>
+      _yt.playlists
+          .getVideos(id)
+          .take(limit)
+          .map(
+            (v) => YtVideo(
+              id: v.id.value,
+              title: v.title,
+              channel: v.author,
+              durationSec: v.duration?.inSeconds ?? 0,
+            ),
+          )
+          .toList();
 
   /// Pulls the video id from a YouTube link, or null if [text] isn't one.
   static String? videoId(String text) {

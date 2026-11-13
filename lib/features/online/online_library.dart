@@ -4,7 +4,7 @@ import 'package:classipod/features/online/online_catalogs.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// What the listener keeps from the online sources: radio presets, podcast
-/// subscriptions and saved YouTube videos. Stored on the phone only.
+/// subscriptions, saved YouTube videos and playlists. Stored on the phone only.
 class OnlineLibrary {
   OnlineLibrary._();
 
@@ -63,5 +63,22 @@ class OnlineLibrary {
     if (!had) list.insert(0, video);
     await _write('online.videos', list.map((v) => v.toJson()).toList());
     return list;
+  }
+
+  static Future<List<YtPlaylist>> savedPlaylists() =>
+      _read('online.playlists', YtPlaylist.fromJson);
+
+  /// Adds [playlist] at the top, replacing any older copy of it.
+  static Future<void> addPlaylist(YtPlaylist playlist) async {
+    final list = await savedPlaylists();
+    list.removeWhere((p) => p.id == playlist.id);
+    list.insert(0, playlist);
+    await _write('online.playlists', list.map((p) => p.toJson()).toList());
+  }
+
+  static Future<void> removePlaylist(String id) async {
+    final list = await savedPlaylists();
+    list.removeWhere((p) => p.id == id);
+    await _write('online.playlists', list.map((p) => p.toJson()).toList());
   }
 }
