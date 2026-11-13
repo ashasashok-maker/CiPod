@@ -406,7 +406,7 @@ class YouTubeAudio {
   /// MP4 streams only, and check a link actually answers before using it.
   /// Last resort is the MP4 video+audio stream, which AVPlayer always plays.
   static Future<String> _appleAudioUrl(String id) async {
-    const clients = [
+    final clients = [
       YoutubeApiClient.ios,
       YoutubeApiClient.androidVr,
       YoutubeApiClient.android,
