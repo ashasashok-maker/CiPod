@@ -19,9 +19,17 @@ mkdir -p "$output"
 staging="$(mktemp -d "$output/.apple-release.XXXXXX")"
 trap 'rm -rf "$staging"' EXIT
 
+# Optional "My YouTube" Google sign-in client, from the environment (e.g.
+# Codemagic's secret variables) so it never has to be committed.
+defines=()
+for name in YT_CLIENT_ID YT_CLIENT_SECRET; do
+  if [[ -n "${!name:-}" ]]; then defines+=("--dart-define=$name=${!name}"); fi
+done
+
 if [[ "$platform" == ios ]]; then
   flutter build ios --release --no-pub --suppress-analytics \
-    --flavor production --target lib/main.dart --no-codesign
+    --flavor production --target lib/main.dart --no-codesign \
+    ${defines[@]+"${defines[@]}"}
 
   app="$repository/build/ios/iphoneos/Runner.app"
   test -d "$app"
@@ -49,7 +57,7 @@ ONLY_ACTIVE_ARCH = NO
 XCCONFIG
   XCODE_XCCONFIG_FILE="$staging/Unsigned.xcconfig" \
     flutter build macos --release --no-pub --suppress-analytics \
-      --target lib/main.dart
+      --target lib/main.dart ${defines[@]+"${defines[@]}"}
 
   app="$repository/build/macos/Build/Products/Release/classipod.app"
   test -d "$app"
