@@ -4,6 +4,7 @@ import 'package:classipod/features/menu/screens/split_screen_placeholder.dart';
 import 'package:classipod/features/music/album/models/album_model.dart';
 import 'package:classipod/features/music/playlist/providers/playlists_provider.dart';
 import 'package:classipod/features/music/search/provider/search_provider.dart';
+import 'package:classipod/features/online/online_catalogs.dart';
 import 'package:classipod/features/settings/controller/settings_preferences_controller.dart';
 import 'package:classipod/features/status_bar/controller/status_bar_entrance_controller.dart';
 import 'package:classipod/features/status_bar/controller/status_bar_transition_observer.dart';
@@ -262,6 +263,9 @@ class _DeviceScreenContentState extends ConsumerState<DeviceScreenContent>
         return route.title(context);
       case Routes.playlistRename:
         return state.extra as String;
+      case Routes.youTubePlaylist:
+      case Routes.myYouTubePlaylist:
+        return (state.extra as YtPlaylist?)?.title ?? route.title(context);
       case Routes.search:
         final query = ref.watch(searchQueryProvider);
         final results = ref.watch(searchProvider(query));
