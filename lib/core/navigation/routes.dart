@@ -88,6 +88,10 @@ enum Routes {
   podcasts,
   podcastEpisodes,
   youTube,
+  youTubePlaylists,
+  youTubePlaylist,
+  myYouTube,
+  myYouTubePlaylist,
   spotify,
   otherApp;
 
@@ -174,6 +178,13 @@ enum Routes {
         return "Episodes";
       case youTube:
         return "YouTube";
+      case youTubePlaylists:
+        return "YouTube Playlists";
+      case youTubePlaylist:
+      case myYouTubePlaylist:
+        return "Playlist";
+      case myYouTube:
+        return "My YouTube";
       case spotify:
         return "Spotify";
       case otherApp:
@@ -770,6 +781,52 @@ final routerProvider = Provider(
                         pageBuilder: (context, state) => const CupertinoPage(
                           child: ScreenPageContent(child: YouTubeScreen()),
                         ),
+                      ),
+                      GoRoute(
+                        path: Routes.youTubePlaylists.name,
+                        name: Routes.youTubePlaylists.name,
+                        parentNavigatorKey: rootNavigatorKey,
+                        pageBuilder: (context, state) => const CupertinoPage(
+                          child: ScreenPageContent(child: YouTubePlaylistsScreen()),
+                        ),
+                        routes: [
+                          GoRoute(
+                            path: Routes.youTubePlaylist.name,
+                            name: Routes.youTubePlaylist.name,
+                            parentNavigatorKey: rootNavigatorKey,
+                            pageBuilder: (context, state) => CupertinoPage(
+                              child: ScreenPageContent(
+                                child: YouTubePlaylistScreen(
+                                  playlist: state.extra as YtPlaylist,
+                                  route: Routes.youTubePlaylist.name,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      GoRoute(
+                        path: Routes.myYouTube.name,
+                        name: Routes.myYouTube.name,
+                        parentNavigatorKey: rootNavigatorKey,
+                        pageBuilder: (context, state) => const CupertinoPage(
+                          child: ScreenPageContent(child: MyYouTubeScreen()),
+                        ),
+                        routes: [
+                          GoRoute(
+                            path: Routes.myYouTubePlaylist.name,
+                            name: Routes.myYouTubePlaylist.name,
+                            parentNavigatorKey: rootNavigatorKey,
+                            pageBuilder: (context, state) => CupertinoPage(
+                              child: ScreenPageContent(
+                                child: YouTubePlaylistScreen(
+                                  playlist: state.extra as YtPlaylist,
+                                  route: Routes.myYouTubePlaylist.name,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       GoRoute(
                         path: Routes.spotify.name,
